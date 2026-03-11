@@ -34,16 +34,16 @@ function closeSidebarOnMobile() {
 let inventory = JSON.parse(localStorage.getItem('modernInventory')) || [];
 
 function changeView(view) {
-    ['nav-dashboard','nav-stock','nav-kasir','nav-rekap'].forEach(id => {
+    ['nav-dashboard','nav-stock','nav-kasir','nav-rekap', 'nav-history'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.classList.remove('active');
     });
-    ['mobile-nav-dashboard','mobile-nav-stock','mobile-nav-kasir','mobile-nav-rekap'].forEach(id => {
+    ['mobile-nav-dashboard','mobile-nav-stock','mobile-nav-kasir','mobile-nav-rekap', 'mobile-nav-history'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.classList.remove('active');
     });
 
-    const views = ['view-dashboard','view-stock','view-kasir','view-rekap'];
+    const views = ['view-dashboard','view-stock','view-kasir','view-rekap', 'view-history'];
     views.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = 'none';
@@ -82,6 +82,16 @@ function changeView(view) {
         if (mEl) mEl.classList.add('active');
         document.getElementById('page-title').innerText = 'Rekap Penjualan';
         initRekap();
+    } else if (view === 'history') {
+        document.getElementById('view-history').style.display = 'block';
+        document.getElementById('nav-history').classList.add('active');
+        const mEl = document.getElementById('mobile-nav-history');
+        if (mEl) mEl.classList.add('active');
+        document.getElementById('page-title').innerText = 'Riwayat Transaksi';
+        renderHistory();
+        const searchInput = document.getElementById('historySearchInput');
+        if (searchInput) searchInput.value = '';
+        searchHistory();
     }
 }
 
@@ -112,12 +122,14 @@ function renderTable() {
             <tr class="fade-in inventory-row" data-item-name="${item.name.toLowerCase()}">
                 <td class="table-row-number">${index + 1}</td>
                 <td class="text-start table-item-name">${item.name}</td>
+                <td class="table-item-price">${formatRupiah(item.price || 0)}</td>
                 <td><span class="${stockClass}">${item.stock} unit</span></td>
                 <td><input type="number" id="qty-${index}" class="qty-input" value="1" min="1" inputmode="numeric"></td>
                 <td>
                     <div class="table-actions">
                         <button class="btn-stock-in" onclick="updateStock(${index}, 'in')" title="Tambah stok"><i class="fas fa-plus fa-sm"></i></button>
                         <button class="btn-stock-out" onclick="updateStock(${index}, 'out')" title="Kurangi stok"><i class="fas fa-minus fa-sm"></i></button>
+                        <button class="btn-edit" onclick="editItem(${index})" title="Edit Barang"><i class="fas fa-pencil-alt fa-sm"></i></button>
                         <button class="btn-delete" onclick="deleteItem(${index})" title="Hapus barang"><i class="fas fa-trash fa-sm"></i></button>
                     </div>
                 </td>
@@ -154,6 +166,10 @@ function renderMobileCards() {
                 </div>
                 <div class="mobile-card-body">
                     <div class="mobile-card-stock-row">
+                        <span class="mobile-card-stock-label">Harga</span>
+                        <span class="mobile-card-price">${formatRupiah(item.price || 0)}</span>
+                    </div>
+                    <div class="mobile-card-stock-row">
                         <span class="mobile-card-stock-label">Stok Tersisa</span>
                         <span class="${stockClass}">${item.stock} unit</span>
                     </div>
@@ -167,6 +183,9 @@ function renderMobileCards() {
                                 <i class="fas fa-minus"></i> Keluar
                             </button>
                         </div>
+                        <button class="mobile-btn-edit" onclick="event.stopPropagation();editItem(${index})">
+                            <i class="fas fa-pencil-alt"></i>
+                        </button>
                         <button class="mobile-btn-delete" onclick="event.stopPropagation();deleteItem(${index})">
                             <i class="fas fa-trash"></i>
                         </button>
@@ -331,6 +350,41 @@ function deleteItem(index) {
     });
 
     newNo.addEventListener('click', closeModal);
+}
+
+function editItem(index) {
+    const item = inventory[index];
+    if (!item) return;
+
+    document.getElementById('editItemName').value = item.name;
+    document.getElementById('editItemPrice').value = item.price || 0;
+    document.getElementById('editItemIndex').value = index;
+
+    const modal = document.getElementById('editItemModal');
+    modal.classList.add('is-visible');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeEditModal() {
+    const modal = document.getElementById('editItemModal');
+    modal.classList.remove('is-visible');
+    document.body.style.overflow = '';
+}
+
+function saveEditItem() {
+    const index = document.getElementById('editItemIndex').value;
+    const newName = document.getElementById('editItemName').value.trim();
+    const newPrice = parseInt(document.getElementById('editItemPrice').value) || 0;
+
+    if (newName === '') {
+        showNotification('Nama barang tidak boleh kosong!', 'error');
+        return;
+    }
+    inventory[index].name = newName;
+    inventory[index].price = newPrice;
+    saveData();
+    closeEditModal();
+    showNotification('Data barang berhasil diperbarui', 'success');
 }
 
 function exportData() {
@@ -572,6 +626,17 @@ function topbarSearchGo() {
 let cart = [];
 let receiptCounter = parseInt(localStorage.getItem('receiptCounter')) || 1;
 
+function getKasirTotals() {
+    const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
+    const diskonPersen = parseFloat(document.getElementById('kasirDiskon')?.value || '0') || 0;
+    const biayaLain = parseInt(document.getElementById('kasirBiayaLain')?.value || '0') || 0;
+
+    const diskonAmount = Math.round((subtotal * diskonPersen) / 100);
+    const total = subtotal - diskonAmount + biayaLain;
+
+    return { subtotal, diskonPersen, diskonAmount, biayaLain, total };
+}
+
 function renderKasirItems() {
     const grid = document.getElementById('kasirItemsGrid');
     if (!grid) return;
@@ -718,15 +783,40 @@ function clearCart() {
 }
 
 function updateKasirTotal() {
-    const total = cart.reduce((s, c) => s + c.price * c.qty, 0);
+    const { subtotal, diskonAmount, biayaLain, total } = getKasirTotals();
+
     const subEl = document.getElementById('kasirSubtotal');
+    if (subEl) subEl.innerText = formatRupiah(subtotal);
+
+    const diskonDisplay = document.getElementById('diskonDisplay');
+    const diskonAmountEl = document.getElementById('diskonAmount');
+    if (diskonDisplay && diskonAmountEl) {
+        if (diskonAmount > 0) {
+            diskonAmountEl.innerText = `- ${formatRupiah(diskonAmount)}`;
+            diskonDisplay.style.display = 'flex';
+        } else {
+            diskonDisplay.style.display = 'none';
+        }
+    }
+
+    const biayaLainDisplay = document.getElementById('biayaLainDisplay');
+    const biayaLainAmountEl = document.getElementById('biayaLainAmount');
+    if (biayaLainDisplay && biayaLainAmountEl) {
+        if (biayaLain > 0) {
+            biayaLainAmountEl.innerText = `+ ${formatRupiah(biayaLain)}`;
+            biayaLainDisplay.style.display = 'flex';
+        } else {
+            biayaLainDisplay.style.display = 'none';
+        }
+    }
+
     const totEl = document.getElementById('kasirTotal');
-    if (subEl) subEl.innerText = formatRupiah(total);
     if (totEl) totEl.innerText = formatRupiah(total);
+    hitungKembalian();
 }
 
 function hitungKembalian() {
-    const total = cart.reduce((s, c) => s + c.price * c.qty, 0);
+    const { total } = getKasirTotals();
     const bayar = parseInt(document.getElementById('kasirBayar')?.value || '0') || 0;
     const box = document.getElementById('kasirKembalianBox');
     const el = document.getElementById('kasirKembalian');
@@ -747,13 +837,63 @@ function hitungKembalian() {
 }
 
 function prosesCheckout() {
-    if (cart.length === 0) { showNotification('Keranjang masih kosong!', 'error'); return; }
+    if (cart.length === 0) {
+        showNotification('Keranjang masih kosong!', 'error');
+        return;
+    }
 
-    const total = cart.reduce((s, c) => s + c.price * c.qty, 0);
+    const { total } = getKasirTotals();
     const bayar = parseInt(document.getElementById('kasirBayar')?.value || '0') || 0;
 
-    if (bayar < total) { showNotification('Uang bayar kurang!', 'error'); return; }
+    if (bayar < total) {
+        showNotification('Uang bayar kurang!', 'error');
+        return;
+    }
 
+    showCheckoutConfirmation();
+}
+
+function showCheckoutConfirmation() {
+    const { total } = getKasirTotals();
+    const bayar = parseInt(document.getElementById('kasirBayar')?.value || '0') || 0;
+    const kembalian = bayar - total;
+
+    const modal = document.getElementById('confirmCheckoutModal');
+    const summaryEl = document.getElementById('checkoutSummary');
+    const confirmBtn = document.getElementById('checkoutConfirmBtn');
+    const cancelBtn = document.getElementById('checkoutCancelBtn');
+
+    if (!modal || !summaryEl || !confirmBtn || !cancelBtn) return;
+
+    summaryEl.innerHTML = `
+        <div style="display:flex; justify-content:space-between; padding-bottom:8px;"><span>Total Belanja:</span> <strong style="color:#9d174d;">${formatRupiah(total)}</strong></div>
+        <div style="display:flex; justify-content:space-between; padding-bottom:8px;"><span>Uang Bayar:</span> <strong>${formatRupiah(bayar)}</strong></div>
+        <div style="display:flex; justify-content:space-between; border-top:1.5px solid #fce7f3; margin-top:4px; padding-top:8px;"><span>Kembalian:</span> <strong style="color:#10b981; font-size:1.1rem;">${formatRupiah(kembalian)}</strong></div>
+    `;
+
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+
+    function closeModal() {
+        modal.style.display = 'none';
+        document.body.style.overflow = '';
+    }
+
+    const newConfirmBtn = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+    newConfirmBtn.addEventListener('click', () => {
+        closeModal();
+        executeCheckout();
+    });
+
+    const newCancelBtn = cancelBtn.cloneNode(true);
+    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+    newCancelBtn.addEventListener('click', closeModal);
+}
+
+function executeCheckout() {
+    const { subtotal, diskonPersen, diskonAmount, biayaLain, total } = getKasirTotals();
+    const bayar = parseInt(document.getElementById('kasirBayar')?.value || '0') || 0;
     const kembalian = bayar - total;
     const noStruk = `STR-${String(receiptCounter).padStart(4, '0')}`;
     receiptCounter++;
@@ -762,27 +902,19 @@ function prosesCheckout() {
     cart.forEach(c => { inventory[c.index].stock -= c.qty; });
     saveDataSilent();
 
-    // Simpan ke riwayat transaksi
-    saveTransaction({
-        noStruk,
-        items: cart.map(c => ({ name: c.name, price: c.price, qty: c.qty })),
-        total,
-        bayar,
-        kembalian,
-        timestamp: new Date().toISOString()
-    });
-
-    cetakStruk({ noStruk, items: [...cart], total, bayar, kembalian });
+    const trxData = { noStruk, items: [...cart], subtotal, diskonPersen, diskonAmount, biayaLain, total, bayar, kembalian };
+    saveTransaction({ ...trxData, items: cart.map(c => ({ name: c.name, price: c.price, qty: c.qty })), timestamp: new Date().toISOString() });
+    cetakStruk(trxData);
 
     cart = [];
-    document.getElementById('kasirBayar').value = '';
+    ['kasirBayar', 'kasirDiskon', 'kasirBiayaLain'].forEach(id => document.getElementById(id).value = '');
     renderKasirItems();
     renderCart();
     renderAll();
-    showNotification(` Transaksi ${noStruk} berhasil!`, 'success');
+    showNotification(`Transaksi ${noStruk} berhasil!`, 'success');
 }
 
-function cetakStruk({ noStruk, items, total, bayar, kembalian }) {
+function cetakStruk({ noStruk, items, subtotal, diskonPersen, diskonAmount, biayaLain, total, bayar, kembalian }) {
     const now = new Date();
     const tgl = now.toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
     const jam = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -796,6 +928,14 @@ function cetakStruk({ noStruk, items, total, bayar, kembalian }) {
             <td style="padding:5px 3px;border-bottom:1px dotted #fce7f3;text-align:right;font-weight:700;">${formatRupiah(c.price * c.qty)}</td>
         </tr>
     `).join('');
+
+    let adjHtml = '';
+    if (diskonAmount > 0) {
+        adjHtml += `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:0.8rem;color:#64748b;"><span>Diskon (${diskonPersen}%)</span><span>- ${formatRupiah(diskonAmount)}</span></div>`;
+    }
+    if (biayaLain > 0) {
+        adjHtml += `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:0.8rem;color:#64748b;"><span>Biaya Lain</span><span>+ ${formatRupiah(biayaLain)}</span></div>`;
+    }
 
     const html = `
         <div style="text-align:center;margin-bottom:14px;">
@@ -820,6 +960,8 @@ function cetakStruk({ noStruk, items, total, bayar, kembalian }) {
         </table>
         <div style="border-top:1px dashed #f9a8d4;margin:10px 0;"></div>
         <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:0.8rem;color:#64748b;"><span>Total Item</span><span>${totalQty} pcs</span></div>
+        <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:0.8rem;color:#64748b;"><span>Subtotal</span><span>${formatRupiah(subtotal)}</span></div>
+        ${adjHtml}
         <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:1rem;font-weight:900;color:#9d174d;border-top:2px solid #ec4899;margin-top:6px;"><span>TOTAL</span><span>${formatRupiah(total)}</span></div>
         <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:0.82rem;color:#1e293b;font-weight:700;"><span>Tunai</span><span>${formatRupiah(bayar)}</span></div>
         <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:0.88rem;color:#10b981;font-weight:800;"><span>Kembalian</span><span>${formatRupiah(kembalian)}</span></div>
@@ -1265,13 +1407,13 @@ function exportRekap() {
         csv += `"${name}",${d.qty},${d.price},${d.income}\n`;
     });
 
-    csv += `\nDetail Transaksi\nNo. Struk,Tanggal,Waktu,Item,Total,Bayar,Kembalian\n`;
+    csv += `\nDetail Transaksi\nNo. Struk,Tanggal,Waktu,Item,Subtotal,Diskon (%),Diskon (Rp),Biaya Lain,Total,Bayar,Kembalian\n`;
     [...transactions].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).forEach(t => {
         const d = new Date(t.timestamp);
         const tgl = d.toLocaleDateString('id-ID');
         const jam = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
         const items = t.items.map(i => `${i.name}(${i.qty})`).join('; ');
-        csv += `${t.noStruk},${tgl},${jam},"${items}",${t.total},${t.bayar},${t.kembalian}\n`;
+        csv += `${t.noStruk},${tgl},${jam},"${items}",${t.subtotal || t.total},${t.diskonPersen || 0},${t.diskonAmount || 0},${t.biayaLain || 0},${t.total},${t.bayar},${t.kembalian}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
